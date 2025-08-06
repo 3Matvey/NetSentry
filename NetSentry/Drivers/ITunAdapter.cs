@@ -17,5 +17,10 @@ namespace NetSentry.Drivers
         /// Удаляет ранее созданный интерфейс по config.TunnelId.
         /// </summary>
         void RemoveInterface(string tunnelId);
+
+        /// <summary>
+        /// Открывает Stream для обмена «сырыми» IP-пакетами через TUN-интерфейс.
+        /// </summary>
+        Stream OpenTunStream(TunnelConfig config);
     }
 }
