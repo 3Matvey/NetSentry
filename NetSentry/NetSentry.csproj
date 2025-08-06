@@ -6,7 +6,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>05c1510e-4bc1-43a3-a5c3-b03f7093f4d2</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
   </PropertyGroup>
+	
+  <PropertyGroup Condition="'$(RuntimeIdentifier)'=='win-x64'">
+    <DefineConstants>WINDOWS</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RuntimeIdentifier)'=='linux-x64'">
+    <DefineConstants>LINUX</DefineConstants>
+  </PropertyGroup>
+
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.7" />

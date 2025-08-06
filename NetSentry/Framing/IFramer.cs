@@ -3,25 +3,29 @@
     /// <summary>
     /// Упаковывает и распаковывает IP-пакеты для передачи по UDP
     /// без лишних аллокаций.
+    /// Заголовок включает версию протокола, TunnelId и длину пакета.
     /// </summary>
     public interface IFramer
     {
         /// <summary>
-        /// Фреймит «сырые» IP-пакеты из TUN.
-        /// Пишет header+payload в <paramref name="destination"/> и возвращает длину результата.
+        /// Упаковывает raw-ip-пакет в кадр с заголовком.
+        /// Заголовок: [1 байт version][1 байт idLen][idLen байт UTF8 TunnelId]
+        ///           [2 байта BE длина payload]
+        /// Затем payload.
         /// </summary>
-        /// <param name="rawIpPacket">IP-пакет из TUN (ReadOnlySpan).</param>
-        /// <param name="destination">Span, куда пишем фрейм.</param>
-        /// <returns>Количество записанных байт (<= destination.Length).</returns>
-        int Frame(ReadOnlySpan<byte> rawIpPacket, Span<byte> destination);
+        /// <param name="tunnelId">Идентификатор туннеля.</param>
+        /// <param name="rawIpPacket">IP-пакет из TUN.</param>
+        /// <param name="destination">Буфер для кадра.</param>
+        /// <returns>Длина записанного кадра.</returns>
+        int Frame(string tunnelId, ReadOnlySpan<byte> rawIpPacket, Span<byte> destination);
 
         /// <summary>
-        /// Убирает обёртку и вытаскивает чистый IP-пакет.
-        /// Пишет payload в <paramref name="destination"/> и возвращает длину.
+        /// Разбирает кадр, извлекая TunnelId и payload.
         /// </summary>
-        /// <param name="payload">Данные после дешифрования (ReadOnlySpan).</param>
-        /// <param name="destination">Span, куда пишем IP-пакет.</param>
-        /// <returns>Количество байт IP-пакета.</returns>
-        int Deframe(ReadOnlySpan<byte> payload, Span<byte> destination);
+        /// <param name="frame">Данные кадра (после дешифровки).</param>
+        /// <param name="tunnelId">Выходной TunnelId.</param>
+        /// <param name="destination">Буфер для payload (IP-пакета).</param>
+        /// <returns>Длина IP-пакета.</returns>
+        int Deframe(ReadOnlySpan<byte> frame, out string tunnelId, Span<byte> destination);
     }
 }

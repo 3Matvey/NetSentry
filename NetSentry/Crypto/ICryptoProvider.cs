@@ -2,9 +2,6 @@
 
 namespace NetSentry.Crypto
 {
-    /// <summary>
-    /// Генерирует криптографические артефакты и базовую конфигурацию туннеля.
-    /// </summary>
     public interface ICryptoProvider
     {
         /// <summary>
@@ -15,8 +12,16 @@ namespace NetSentry.Crypto
         /// - порт (UDP) для прослушивания,
         /// - время истечения (ExpiresAt).
         /// </summary>
-        /// <param name="peerName">Уникальное имя peer-а (для логов, конфигов).</param>
-        /// <param name="durationHours">Сколько часов жить туннелю.</param>
         TunnelConfig CreateConfig(string peerName, int durationHours);
+
+        /// <summary>
+        /// Возвращает общий секрет, сгенерированный при CreateConfig, по идентификатору туннеля.
+        /// </summary>
+        byte[] GetSharedSecret(string tunnelId);
+
+        /// <summary>
+        /// Удаляет сохранённый общий секрет для указанного туннеля.
+        /// </summary>
+        void RemoveSecret(string tunnelId);
     }
 }
