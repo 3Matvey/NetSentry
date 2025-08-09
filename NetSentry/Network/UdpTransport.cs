@@ -56,14 +56,17 @@ namespace NetSentry.Network
         /// <returns>Задача отправки.</returns>
         public async Task SendAsync(TunnelConfig config, ReadOnlyMemory<byte> frame)
         {
-            // Формируем конечную точку назначения.
-            var endpoint = new IPEndPoint(IPAddress.Parse(config.RemoteIp), config.ListenPort);
-            // Отправляем фрейм через сокет.
+            var address = IPAddress.TryParse(config.RemoteHost, out var ip)
+                ? ip
+                : (await Dns.GetHostAddressesAsync(config.RemoteHost))
+                    .First(a => a.AddressFamily == AddressFamily.InterNetwork);
+
+            var endpoint = new IPEndPoint(address, config.RemotePort);
             await _socket.SendAsync(frame, endpoint);
         }
 
         public void Dispose()
-        {       
+        {
             _socket.Dispose();
             GC.SuppressFinalize(this);
         }

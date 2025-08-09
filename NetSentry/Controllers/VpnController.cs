@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using NetSentry.DTOs.Requests;
 using NetSentry.DTOs.Responses;
-using NetSentry.ResultPattern;
 using NetSentry.Services;
+using NetSentry.Shared.ResultPattern;
 
 namespace NetSentry.Controllers
 {
@@ -16,11 +16,7 @@ namespace NetSentry.Controllers
             var result = await tunnelService.CreateAsync(request.PeerName, request.DurationHours);
             return result.Match(
                 onSuccess: () => Ok(TunnelConfigResponse.FromConfig(result.Value)),
-                onFailure: err => err.Code switch
-                {
-                    "Tunnel.InvalidRequest" => BadRequest(new { err.Code, err.Description }),
-                    _ => Problem(err)
-                }
+                onFailure: Problem
             );
         }
 
@@ -30,11 +26,7 @@ namespace NetSentry.Controllers
             var result = await tunnelService.GetAsync(tunnelId);
             return result.Match(
                 onSuccess: () => Ok(TunnelConfigResponse.FromConfig(result.Value)),
-                onFailure: err => err.Code switch
-                {
-                    "TunnelNotFound" => NotFound(new { err.Code, err.Description }),
-                    _ => Problem(err)
-                }
+                onFailure: Problem
             );
         }
 
@@ -44,11 +36,7 @@ namespace NetSentry.Controllers
             var result = await tunnelService.DeleteAsync(tunnelId);
             return result.Match(
                 onSuccess: NoContent,
-                onFailure: err => err.Code switch
-                {
-                    "TunnelNotFound" => NotFound(new { err.Code, err.Description }),
-                    _ => Problem(err)
-                }
+                onFailure: Problem
             );
         }
     }

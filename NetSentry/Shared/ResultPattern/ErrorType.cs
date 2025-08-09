@@ -1,4 +1,4 @@
-﻿namespace NetSentry.ResultPattern;
+﻿namespace NetSentry.Shared.ResultPattern;
 
 /// <summary>
 /// Represents the types of errors that can occur in the application.

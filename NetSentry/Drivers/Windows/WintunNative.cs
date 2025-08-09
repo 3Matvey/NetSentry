@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace NetSentry.Drivers
+namespace NetSentry.Drivers.Windows
 {
     /// <summary>
     /// P/Invoke declarations for wintun.dll via LibraryImport (source-generated).

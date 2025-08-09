@@ -9,6 +9,9 @@
         string LocalIp,
         string RemoteIp,
         int ListenPort,
-        DateTimeOffset ExpiresAt
+        DateTimeOffset ExpiresAt,
+
+        string RemoteHost,        // DNS или публичный IP удалённого хоста
+        int RemotePort            // UDP-порт удалённого хоста (может отличаться от ListenPort)
     );
 }

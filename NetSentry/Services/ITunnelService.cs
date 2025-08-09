@@ -1,5 +1,5 @@
 ﻿using NetSentry.Models;
-using NetSentry.ResultPattern;
+using NetSentry.Shared.ResultPattern;
 
 namespace NetSentry.Services
 {

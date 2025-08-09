@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace NetSentry.ResultPattern;
+namespace NetSentry.Shared.ResultPattern;
 
 /// <summary>
 /// Represents the result of an operation that can either be successful or contain an error.

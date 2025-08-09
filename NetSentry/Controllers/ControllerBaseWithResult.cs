@@ -1,5 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using NetSentry.ResultPattern;
+using NetSentry.Shared.ResultPattern;
 
 namespace NetSentry.Controllers
 {

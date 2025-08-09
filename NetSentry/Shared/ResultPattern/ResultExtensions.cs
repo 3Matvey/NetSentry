@@ -1,4 +1,4 @@
-﻿namespace NetSentry.ResultPattern;
+﻿namespace NetSentry.Shared.ResultPattern;
 
 public static class ResultExtensions
 {

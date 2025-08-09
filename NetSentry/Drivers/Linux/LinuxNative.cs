@@ -1,7 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 
-namespace NetSentry.Drivers
+namespace NetSentry.Drivers.Linux
 {
     /// <summary>
     /// P/Invoke declarations for Linux TUN interface via source-generated marshalling.
@@ -29,10 +29,10 @@ namespace NetSentry.Drivers
         [LibraryImport(LibC, SetLastError = true)]
         internal static partial int close(int fd);
 
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+        //[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
         internal struct ifreq
         {
-            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 16)]
+            //[MarshalAs(UnmanagedType.ByValTStr, SizeConst = 16)]
             public string ifr_name;
             public short ifr_flags;
 
@@ -52,7 +52,7 @@ namespace NetSentry.Drivers
             }
         }
 
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+        [StructLayout(LayoutKind.Sequential)]
         internal unsafe struct ifreq_native
         {
             public fixed byte ifr_name[16];

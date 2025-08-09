@@ -1,4 +1,4 @@
-﻿namespace NetSentry.ResultPattern;
+﻿namespace NetSentry.Shared.ResultPattern;
 
 /// <summary>
 /// Represents an error in the application.

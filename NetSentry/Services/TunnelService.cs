@@ -1,18 +1,19 @@
 ﻿using Microsoft.Win32.SafeHandles;
 using NetSentry.Crypto;
 using NetSentry.Drivers;
+using NetSentry.Drivers.Windows;
 using NetSentry.Framing;
 using NetSentry.Models;
 using NetSentry.Network;
-using NetSentry.ResultPattern;
 using NetSentry.Routing;
+using NetSentry.Shared.Platform;
+using NetSentry.Shared.ResultPattern;
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using static NetSentry.Drivers.LinuxNative;
+using static NetSentry.Drivers.Linux.LinuxNative;
 
 namespace NetSentry.Services
 {
@@ -22,33 +23,34 @@ namespace NetSentry.Services
     public class TunnelService : ITunnelService
     {
         private readonly ICryptoProvider _crypto;
-        private readonly ITunAdapter _tun;
+        private readonly TunAdapter _tun;
         private readonly IRouteManager _route;
         private readonly IFramer _framer;
         private readonly IUdpTransport _udp;
+        private readonly IPlatformInfo _platform;
 
-        // Текущие конфигурации и токены отмены
         private readonly ConcurrentDictionary<string, TunnelConfig> _configs = new();
         private readonly ConcurrentDictionary<string, CancellationTokenSource> _cts = new();
 
         public TunnelService(
             ICryptoProvider crypto,
-            ITunAdapter tun,
+            TunAdapter tun,
             IRouteManager route,
             IFramer framer,
-            IUdpTransport udp)
+            IUdpTransport udp,
+            IPlatformInfo platform)
         {
             _crypto = crypto;
             _tun = tun;
             _route = route;
             _framer = framer;
             _udp = udp;
+            _platform = platform;
         }
 
         public Task<Result<TunnelConfig>> CreateAsync(string peerName, int durationHours)
         {
             var config = _crypto.CreateConfig(peerName, durationHours);
-            var secret = _crypto.GetSharedSecret(config.TunnelId);
 
             _tun.CreateInterface(config);
             _route.ApplyRouting(config);
@@ -57,8 +59,8 @@ namespace NetSentry.Services
             _configs[config.TunnelId] = config;
             _cts[config.TunnelId] = cts;
 
-            StartTunToUdpLoop(config, secret, cts.Token);
-            StartUdpToTunLoop(config, secret, cts.Token);
+            StartTunToUdpLoop(config, cts.Token);
+            StartUdpToTunLoop(config, cts.Token);
 
             return Task.FromResult(Result<TunnelConfig>.Success(config));
         }
@@ -89,72 +91,59 @@ namespace NetSentry.Services
             return Task.FromResult(Result.Success());
         }
 
-        private void StartTunToUdpLoop(TunnelConfig cfg, byte[] secret, CancellationToken token)
+        private void StartTunToUdpLoop(TunnelConfig cfg, CancellationToken token)
         {
             _ = Task.Run(async () =>
             {
-                var aead = new System.Security.Cryptography.ChaCha20Poly1305(secret);
+                var session = _crypto.GetSession(cfg.TunnelId);
 
-                byte[] nonce = new byte[12];
-                byte[] tag = new byte[16];
                 byte[] rawBuf = ArrayPool<byte>.Shared.Rent(1500);
 
                 try
                 {
-#if true
-                    // открываем дескриптор и получаем его из TunAdapter (повторяя логику CreateInterface, но не закрывая fd)
-                    int fd = open("/dev/net/tun", O_RDWR);
-                    // … ioctl точно так же, как в TunAdapter …
-                    var tunStream = new FileStream(new SafeFileHandle(fd, true),
-                                                   FileAccess.ReadWrite,
-                                                   bufferSize: 1500,
-                                                   isAsync: true);
-#elif WINDOWS
-                    // аналогично: получить handle из WintunNative и обернуть его в Stream
-                    var tunStream = new WintunStream(adapterHandle); 
-#else
-                    throw new PlatformNotSupportedException();
-#endif
+                    using var tunStream = _tun.OpenTunStream(cfg);
+
+                    //Span<byte> frameStack = stackalloc byte[2048];
+
                     while (!token.IsCancellationRequested)
                     {
                         int ipLen = await tunStream.ReadAsync(rawBuf.AsMemory(0, rawBuf.Length), token);
                         if (ipLen <= 0) continue;
 
-                        // Используем только byte[] для арендуемых буферов, чтобы не хранить Span<byte> за await
-                        byte[] frameBufArr = default!;
-                        byte[] cipherBufArr = default!;
-                        byte[] packetBufArr = default!;
-#pragma warning disable CA2014 // стек вряд-ли переполнится, но если что арендуем)
-                        Span<byte> frameBuf = ipLen <= 512
-                            ? stackalloc byte[1600]
-                            : (frameBufArr = ArrayPool<byte>.Shared.Rent(1600)).AsSpan(0, 1600);
-                        Span<byte> cipherBuf = ipLen <= 512
-                            ? stackalloc byte[1600]
-                            : (cipherBufArr = ArrayPool<byte>.Shared.Rent(1600)).AsSpan(0, 1600);
-                        Span<byte> packetBuf = ipLen <= 512
-                            ? stackalloc byte[12 + 1600 + 16]
-                            : (packetBufArr = ArrayPool<byte>.Shared.Rent(12 + 1600 + 16)).AsSpan(0, 12 + 1600 + 16);
-#pragma warning restore CA2014
+                        int framedLenGuess = ipLen + 64;
+
+                        byte[]? frameArr = null;
+                        Span<byte> frameBuf =
+                            framedLenGuess <= 2048
+                                ? stackalloc byte[framedLenGuess]
+                                : (frameArr = ArrayPool<byte>.Shared.Rent(framedLenGuess)).AsSpan(0, framedLenGuess);
+
+                        byte[]? packetArr = null;
+                        Span<byte> nonce = stackalloc byte[12];
+                        Span<byte> tag = stackalloc byte[16];
+
                         try
                         {
                             int hdrLen = _framer.Frame(cfg.TunnelId, rawBuf.AsSpan(0, ipLen), frameBuf);
 
-                            Random.Shared.NextBytes(nonce);
-                            aead.Encrypt(nonce, frameBuf[..hdrLen], cipherBuf, tag);
+                            int totalLen = 12 + hdrLen + 16;
+                            packetArr = ArrayPool<byte>.Shared.Rent(totalLen);
+                            var packetBuf = packetArr.AsSpan(0, totalLen);
 
-                            packetBuf.Clear();
+                            session.Encrypt(frameBuf[..hdrLen],
+                                            nonce,
+                                            packetBuf.Slice(12, hdrLen),
+                                            tag);
+
                             nonce.CopyTo(packetBuf);
-                            cipherBuf[..hdrLen].CopyTo(packetBuf[12..]);
-                            tag.CopyTo(packetBuf[(12 + hdrLen)..]);
+                            tag.CopyTo(packetBuf.Slice(12 + hdrLen, 16));
 
-                            await _udp.SendAsync(cfg, packetBuf[..(12 + hdrLen + 16)].ToArray());
+                            await _udp.SendAsync(cfg, packetArr.AsMemory(0, totalLen));
                         }
                         finally
                         {
-                            // Возвращаем буферы в пул, если они были арендованы
-                            if (frameBufArr != null) ArrayPool<byte>.Shared.Return(frameBufArr);
-                            if (cipherBufArr != null) ArrayPool<byte>.Shared.Return(cipherBufArr);
-                            if (packetBufArr != null) ArrayPool<byte>.Shared.Return(packetBufArr);
+                            if (packetArr != null) ArrayPool<byte>.Shared.Return(packetArr);
+                            if (frameArr != null) ArrayPool<byte>.Shared.Return(frameArr);
                         }
                     }
                 }
@@ -165,16 +154,16 @@ namespace NetSentry.Services
             }, token);
         }
 
-        private void StartUdpToTunLoop(TunnelConfig cfg, byte[] secret, CancellationToken token)
+        private void StartUdpToTunLoop(TunnelConfig cfg, CancellationToken token)
         {
             _ = Task.Run(async () =>
             {
                 const int MaxFrameSize = 1600;
-                const int HeaderSize = 12 /*nonce*/ + 16 /*tag*/;
+                const int HeaderSize = 12 + 16;
                 const int MinFrameSize = HeaderSize + 1;
 
-                var aead = new ChaCha20Poly1305(secret);
-                // используем арендуемые буферы, чтобы потом вернуть их в пул
+                var session = _crypto.GetSession(cfg.TunnelId);
+
                 byte[] ipBuf = ArrayPool<byte>.Shared.Rent(1500);
                 byte[] udpBuf = ArrayPool<byte>.Shared.Rent(MaxFrameSize);
 
@@ -189,12 +178,8 @@ namespace NetSentry.Services
 
                         int length = data.Length;
                         if (length < MinFrameSize)
-                        {
-                            //_logger.LogWarning("Too-short frame ({Length} bytes) on tunnel {TunnelId}", length, cfg.TunnelId);
                             continue;
-                        }
 
-                        // расширяем буфер, если нужно
                         if (length > udpBuf.Length)
                         {
                             ArrayPool<byte>.Shared.Return(udpBuf);
@@ -208,37 +193,25 @@ namespace NetSentry.Services
                         var tag = span.Slice(length - 16, 16);
                         var ciphertext = span.Slice(12, length - HeaderSize);
 
-                        // дешифруем
-                        try
-                        {
-                            aead.Decrypt(nonce, ciphertext, tag, ipBuf);
-                        }
-                        catch (CryptographicException ex)
-                        {
-                            //_logger.LogWarning(ex, "Decrypt failed for tunnel {TunnelId}", cfg.TunnelId);
+                        if (!session.Decrypt(nonce, ciphertext, tag, ipBuf))
                             continue;
-                        }
 
-                        // дефреймим
                         int ipLen;
                         try
                         {
-                            ipLen = _framer.Deframe(ciphertext, out var parsedId, ipBuf);
+                            ipLen = _framer.Deframe(ipBuf.AsSpan(0, ciphertext.Length), out var parsedId, ipBuf);
                         }
-                        catch (Exception ex)
+                        catch
                         {
-                            //_logger.LogWarning(ex, "Deframe failed for tunnel {TunnelId}", cfg.TunnelId);
                             continue;
                         }
 
-                        // асинхронно пишем IP-пакет в TUN
                         try
                         {
                             await tunStream.WriteAsync(ipBuf.AsMemory(0, ipLen), token);
                         }
-                        catch (Exception ex)
+                        catch
                         {
-                            //_logger.LogError(ex, "WriteAsync to TUN failed for tunnel {TunnelId}", cfg.TunnelId);
                             break;
                         }
                     }
@@ -250,7 +223,5 @@ namespace NetSentry.Services
                 }
             }, token);
         }
-
-
     }
 }

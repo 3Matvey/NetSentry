@@ -9,12 +9,12 @@
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
   </PropertyGroup>
 	
-  <PropertyGroup Condition="'$(RuntimeIdentifier)'=='win-x64'">
+  <!--<PropertyGroup Condition="'$(RuntimeIdentifier)'=='win-x64'">
     <DefineConstants>WINDOWS</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(RuntimeIdentifier)'=='linux-x64'">
     <DefineConstants>LINUX</DefineConstants>
-  </PropertyGroup>
+  </PropertyGroup>-->
 
 
   <ItemGroup>

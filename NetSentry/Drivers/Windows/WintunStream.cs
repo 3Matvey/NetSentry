@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
 
-namespace NetSentry.Drivers
+namespace NetSentry.Drivers.Windows
 {
-    internal class WintunStream(IntPtr handle) : Stream
+    internal class WintunStream(nint handle) : Stream
     {
         private bool _disposed;
 
@@ -20,8 +20,8 @@ namespace NetSentry.Drivers
         {
             ThrowIfDisposed();
             
-            IntPtr packet = WintunNative.WintunReceivePacket(handle, out uint size);
-            if (packet == IntPtr.Zero || size == 0)
+            nint packet = WintunNative.WintunReceivePacket(handle, out uint size);
+            if (packet == nint.Zero || size == 0)
                 return 0;
 
             int bytesToCopy = Math.Min(count, (int)size);
@@ -33,8 +33,8 @@ namespace NetSentry.Drivers
         {
             ThrowIfDisposed();
 
-            IntPtr packet = WintunNative.WintunAllocateSendPacket(handle, (uint)count);
-            if (packet == IntPtr.Zero)
+            nint packet = WintunNative.WintunAllocateSendPacket(handle, (uint)count);
+            if (packet == nint.Zero)
                 throw new IOException("Failed to allocate packet buffer");
 
             Marshal.Copy(buffer, offset, packet, count);

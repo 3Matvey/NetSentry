@@ -1,29 +1,52 @@
+using NetSentry.Crypto;
+using NetSentry.Drivers;
+using NetSentry.Drivers.Linux;
+using NetSentry.Drivers.Windows;
+using NetSentry.Framing;
+using NetSentry.Network;
+using NetSentry.Routing;
+using NetSentry.Services;
+using NetSentry.Shared.Platform;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// === MVC + OpenAPI ===
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
-// DI: регистрация сервисов и зависимостей
-builder.Services.AddSingleton<NetSentry.Crypto.ICryptoProvider, NetSentry.Crypto.CryptoProvider>();
-builder.Services.AddSingleton<NetSentry.Drivers.ITunAdapter, NetSentry.Drivers.TunAdapter>();
-#if WINDOWS
-builder.Services.AddSingleton<NetSentry.Routing.IRouteManager, NetSentry.Routing.WindowsRouteManager>();
-#else
-builder.Services.AddSingleton<NetSentry.Routing.IRouteManager, NetSentry.Routing.LinuxRouteManager>();
-#endif
-builder.Services.AddSingleton<NetSentry.Framing.IFramer, NetSentry.Framing.AdvancedFramer>();
+// === Общие зависимости ===
+builder.Services.AddSingleton<IPlatformInfo, PlatformInfo>();
+builder.Services.AddSingleton<ICryptoProvider, CryptoProvider>();
+builder.Services.AddSingleton<IFramer, AdvancedFramer>();
 
+// === Платформозависимые реализации ===
+var platform = new PlatformInfo().Platform;
 
-var config = builder.Configuration;
-int listenPort = config.GetValue<int>("UdpTransport:ListenPort");
+if (platform == PlatformType.Windows)
+{
+    builder.Services.AddSingleton<IRouteManager, WindowsRouteManager>();
+    builder.Services.AddSingleton<TunAdapter, WindowsTunAdapter>();
+}
+else if (platform == PlatformType.Linux)
+{
+    builder.Services.AddSingleton<IRouteManager, LinuxRouteManager>();
+    builder.Services.AddSingleton<TunAdapter, LinuxTunAdapter>();
+}
+else
+{
+    throw new PlatformNotSupportedException($"Unsupported platform: {platform}");
+}
 
-builder.Services.AddSingleton<NetSentry.Network.IUdpTransport>(sp =>
-    new NetSentry.Network.UdpTransport(listenPort)); builder.Services.AddSingleton<NetSentry.Services.ITunnelService, NetSentry.Services.TunnelService>();
+// === UDP-транспорт ===
+int listenPort = builder.Configuration.GetValue<int?>("UdpTransport:ListenPort") ?? 51888;
+builder.Services.AddSingleton<IUdpTransport>(_ => new UdpTransport(listenPort));
+
+// === Основной сервис туннелей ===
+builder.Services.AddSingleton<ITunnelService, TunnelService>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// === HTTP pipeline ===
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

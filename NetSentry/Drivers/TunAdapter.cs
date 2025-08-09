@@ -1,26 +1,38 @@
-﻿using System;
-using System.Collections.Concurrent;
+﻿using NetSentry.Models;
 using System.Diagnostics;
-using System.IO;
-using Microsoft.Win32.SafeHandles;
-using NetSentry.Models;
-using static NetSentry.Drivers.LinuxNative;
-using static NetSentry.Drivers.WintunNative;
 
 namespace NetSentry.Drivers
 {
     /// <summary>
-    /// Поднимает и удаляет виртуальные сетевые интерфейсы для VPN-туннеля.
+    /// Управление виртуальным сетевым интерфейсом для VPN-туннеля.
     /// </summary>
-    public class TunAdapter : ITunAdapter, IDisposable
+    public abstract class TunAdapter : IDisposable
     {
-        private readonly ConcurrentDictionary<string, IntPtr> _adapterHandles = new();
-        private bool _disposed;
+        private protected bool _disposed;    
+        /// <summary>
+        /// Поднимает на хосте интерфейс с именем config.TunnelId,
+        /// назначает ему IP, MTU и т.п.
+        /// </summary>
+        public abstract void CreateInterface(TunnelConfig config);
 
         /// <summary>
-        /// Общий метод запуска процесса с выбросом исключения при ошибке.
+        /// Удаляет ранее созданный интерфейс по config.TunnelId.
         /// </summary>
-        private static void RunProcess(string cmd, string args)
+        public abstract void RemoveInterface(string tunnelId);
+
+        /// <summary>
+        /// Открывает Stream для обмена «сырыми» IP-пакетами через TUN-интерфейс.
+        /// </summary>
+        public abstract Stream OpenTunStream(TunnelConfig config);
+        public virtual void Dispose()
+        {
+            if (_disposed) return;
+
+            _disposed = true;
+            GC.SuppressFinalize(this);
+        }
+
+        protected static void RunProcess(string cmd, string args)
         {
             var psi = new ProcessStartInfo(cmd, args)
             {
@@ -38,128 +50,11 @@ namespace NetSentry.Drivers
             }
         }
 
-        private static void ThrowIfConfigIsNull(TunnelConfig config)
+        protected static void ThrowIfConfigIsNull(TunnelConfig config)
         {
             ArgumentNullException.ThrowIfNull(config);
             ArgumentException.ThrowIfNullOrEmpty(config.TunnelId);
             ArgumentException.ThrowIfNullOrEmpty(config.LocalIp);
-        }
-
-#if WINDOWS
-        public void CreateInterface(TunnelConfig config)
-        {
-            ThrowIfConfigIsNull(config);
-
-            var handle = WintunCreateAdapter(config.TunnelId, "NetSentry", 0);
-            if (handle == IntPtr.Zero)
-                throw new InvalidOperationException("WintunCreateAdapter failed");
-
-            _adapterHandles[config.TunnelId] = handle;
-            try
-            {
-                RunProcess("netsh", $"interface ip set address \"{config.TunnelId}\" static {config.LocalIp} 255.255.255.0");
-                RunProcess("netsh", $"interface set interface \"{config.TunnelId}\" enable");
-            }
-            catch
-            {
-                // Rollback on failure
-                WintunCloseAdapter(handle);
-                _adapterHandles.TryRemove(config.TunnelId, out _);
-                throw;
-            }
-        }
-
-        public void RemoveInterface(string tunnelId)
-        {
-            if (_adapterHandles.TryRemove(tunnelId, out var handle))
-            {
-                WintunCloseAdapter(handle);
-                RunProcess("netsh", $"interface set interface \"{tunnelId}\" disable");
-                RunProcess("netsh", $"interface delete interface \"{tunnelId}\"");
-            }
-        }
-#elif LINUX
-        public void CreateInterface(TunnelConfig config)
-        {
-            ThrowIfConfigIsNull(config);
-
-            int fd = -1;
-            try
-            {
-                fd = open("/dev/net/tun", O_RDWR);
-                if (fd < 0)
-                    throw new InvalidOperationException("Cannot open /dev/net/tun");
-
-                string name = config.TunnelId.Length > 15 ? config.TunnelId[..15] : config.TunnelId;
-                ifreq_native nativeIfr = new ifreq { ifr_name = name, ifr_flags = (IFF_TUN | IFF_NO_PI) };
-                if (ioctl(fd, TUNSETIFF, ref nativeIfr) < 0)
-                    throw new InvalidOperationException("ioctl TUNSETIFF failed");
-
-                RunProcess("ip", $"addr add {config.LocalIp}/24 dev {name}");
-                RunProcess("ip", $"link set dev {name} up");
-            }
-            finally
-            {
-                if (fd >= 0)
-                    close(fd);
-            }
-        }
-
-        public void RemoveInterface(string tunnelId)
-        {
-            string name = tunnelId.Length > 15 ? tunnelId[..15] : tunnelId;
-            RunProcess("ip", $"link set dev {name} down");
-            RunProcess("ip", $"link delete {name}");
-        }
-#else
-        public void CreateInterface(TunnelConfig config)
-            => throw new PlatformNotSupportedException();
-
-        public void RemoveInterface(string tunnelId)
-            => throw new PlatformNotSupportedException();
-#endif
-
-        public Stream OpenTunStream(TunnelConfig config)
-        {
-#if WINDOWS
-            if (!_adapterHandles.TryGetValue(config.TunnelId, out var handle))
-                throw new InvalidOperationException("Adapter handle not found");
-            return new WintunStream(handle);
-#elif LINUX
-            int fd = open("/dev/net/tun", O_RDWR);
-            if (fd < 0)
-                throw new InvalidOperationException("Cannot open /dev/net/tun");
-            try
-            {
-                string name = config.TunnelId.Length > 15 ? config.TunnelId[..15] : config.TunnelId;
-                ifreq_native nativeIfr = new ifreq { ifr_name = name, ifr_flags = IFF_TUN | IFF_NO_PI };
-                if (ioctl(fd, TUNSETIFF, ref nativeIfr) < 0)
-                    throw new InvalidOperationException("ioctl TUNSETIFF failed");
-
-                return new FileStream(new SafeFileHandle((IntPtr)fd, ownsHandle: true), FileAccess.ReadWrite, 1500, isAsync: true);
-            }
-            catch
-            {
-                close(fd);
-                throw;
-            }
-#else
-            throw new PlatformNotSupportedException();
-#endif
-        }
-
-        ~TunAdapter() => Dispose();
-
-        public void Dispose()
-        {
-            if (_disposed) return;
-#if WINDOWS
-            foreach (var handle in _adapterHandles.Values)
-                WintunCloseAdapter(handle);
-            _adapterHandles.Clear();
-#endif
-            _disposed = true;
-            GC.SuppressFinalize(this);
         }
     }
 }

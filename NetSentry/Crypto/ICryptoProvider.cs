@@ -23,5 +23,10 @@ namespace NetSentry.Crypto
         /// Удаляет сохранённый общий секрет для указанного туннеля.
         /// </summary>
         void RemoveSecret(string tunnelId);
+
+        /// <summary>
+        /// получить (или создать) крипто-сессию для туннеля
+        /// </summary>
+        ITunnelCryptoSession GetSession(string tunnelId);
     }
 }
